@@ -15,13 +15,15 @@ build_apk:
     - flutter build apk --release
   artifacts:
     paths:
-    - build/app/outputs/apk/**/release/*.apk
+    - shots_studio/build/app/outputs/flutter-apk/app-release.apk
     expire_in: 1 month
 
   rules:
+    - if: '$CI_COMMIT_BRANCH == "feat/ci-build-apk"'
+      when: always
     - if: '$CI_COMMIT_TAG'
-      when: always    # run automatically on tag
-    - when: manual    # allow manual trigger for anything else
+      when: always
+    - when: manual
 
 # GitLab Pages job
 pages:
