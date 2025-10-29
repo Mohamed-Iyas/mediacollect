@@ -36,6 +36,8 @@ import 'package:shots_studio/utils/theme_utils.dart';
 import 'package:shots_studio/utils/theme_manager.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:shots_studio/services/image_loader_service.dart';
+import 'package:shots_studio/services/video_loader_service.dart';
+import 'package:shots_studio/models/video_model.dart';
 import 'package:shots_studio/services/custom_path_service.dart';
 import 'package:shots_studio/services/corrupt_file_service.dart';
 import 'package:shots_studio/widgets/custom_paths_dialog.dart';
@@ -246,8 +248,10 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final List<Screenshot> _screenshots = [];
+  final List<Video> _videos = [];
   final List<Collection> _collections = [];
   final ImageLoaderService _imageLoaderService = ImageLoaderService();
+  final VideoLoaderService _videoLoaderService = VideoLoaderService();
   bool _isLoading = false;
   bool _isProcessingAI = false;
   bool _isInitializingProcessing = false;
@@ -625,6 +629,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
     await prefs.setString('screenshots', encodedScreenshots);
 
+    final String encodedVideos = jsonEncode(
+      _videos.map((v) => v.toJson()).toList(),
+    );
+    await prefs.setString('videos', encodedVideos);
+
     final String encodedCollections = jsonEncode(
       _collections.map((c) => c.toJson()).toList(),
     );
@@ -643,6 +652,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _screenshots.addAll(
           decodedScreenshots.map(
             (json) => Screenshot.fromJson(json as Map<String, dynamic>),
+          ),
+        );
+      });
+    }
+
+    final String? storedVideos = prefs.getString('videos');
+    if (storedVideos != null && storedVideos.isNotEmpty) {
+      final List<dynamic> decodedVideos = jsonDecode(storedVideos);
+      setState(() {
+        _videos.clear();
+        _videos.addAll(
+          decodedVideos.map(
+            (json) => Video.fromJson(json as Map<String, dynamic>),
           ),
         );
       });
@@ -1095,6 +1117,39 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _loadVideo(ImageSource source) async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final result = await _videoLoaderService.loadFromVideoPicker(
+        source: source,
+        existingVideos: _videos,
+      );
+
+      if (result.success) {
+        setState(() {
+          _videos.addAll(result.videos);
+          _isLoading = false;
+        });
+        await _saveDataToPrefs();
+      } else {
+        setState(() {
+          _isLoading = false;
+        });
+        if (result.errorMessage != null) {
+          print('Error loading video: ${result.errorMessage}');
+        }
+      }
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      print('Unexpected error loading video: $e');
+    }
+  }
+
   Future<void> _loadAndroidScreenshots({bool forceReload = false}) async {
     if (kIsWeb) return;
 
@@ -1387,26 +1442,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _saveDataToPrefs();
   }
 
-  void _bulkDeleteScreenshots(List<String> screenshotIds) {
-    if (screenshotIds.isEmpty) return;
+  void _bulkDeleteScreenshots(List<String> mediaIds) {
+    if (mediaIds.isEmpty) return;
 
     // Log bulk delete analytics
-    AnalyticsService().logFeatureUsed('bulk_delete_screenshots');
+    AnalyticsService().logFeatureUsed('bulk_delete_media');
 
     setState(() {
-      // Mark all screenshots as deleted
-      for (String screenshotId in screenshotIds) {
+      // Mark all media as deleted
+      for (String mediaId in mediaIds) {
         final screenshotIndex = _screenshots.indexWhere(
-          (s) => s.id == screenshotId,
+          (s) => s.id == mediaId,
         );
         if (screenshotIndex != -1) {
           _screenshots[screenshotIndex].isDeleted = true;
         }
 
-        // Remove screenshot from all collections
+        final videoIndex = _videos.indexWhere(
+          (v) => v.id == mediaId,
+        );
+        if (videoIndex != -1) {
+          _videos[videoIndex].isDeleted = true;
+        }
+
+        // Remove media from all collections
         for (var collection in _collections) {
-          if (collection.screenshotIds.contains(screenshotId)) {
-            final updatedCollection = collection.removeScreenshot(screenshotId);
+          if (collection.screenshotIds.contains(mediaId)) {
+            final updatedCollection = collection.removeScreenshot(mediaId);
             _updateCollection(updatedCollection);
           }
         }
@@ -1415,9 +1477,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     _saveDataToPrefs();
 
-    // Log analytics for the number of screenshots deleted
+    // Log analytics for the number of media deleted
     AnalyticsService().logFeatureUsed(
-      'bulk_delete_count_${screenshotIds.length}',
+      'bulk_delete_count_${mediaIds.length}',
     );
   }
 
@@ -1945,6 +2007,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         distance: 80,
         actions: [
           ExpandableFabAction(
+            icon: Icons.video_library,
+            label: 'Video',
+            onPressed: () {
+              _loadVideo(ImageSource.gallery);
+            },
+          ),
+          ExpandableFabAction(
             icon: Icons.photo_library,
             label: 'Gallery',
             onPressed: () {
@@ -2049,7 +2118,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 },
                 body: ScreenshotsSection(
                   screenshots: _activeScreenshots,
-                  onScreenshotTap: _showScreenshotDetail,
+                  videos: _videos,
+                  onMediaTap: _showMediaDetail,
                   onBulkDelete: _bulkDeleteScreenshots,
                   onScreenshotUpdated: _onScreenshotUpdated,
                   screenshotDetailBuilder: (context, screenshot) {
@@ -2072,6 +2142,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   },
                 ),
               ),
+    );
+  }
+
+  void _showMediaDetail(dynamic media) {
+    if (media is Screenshot) {
+      _showScreenshotDetail(media);
+    } else if (media is Video) {
+      _showVideoDetail(media);
+    }
+  }
+
+  void _showVideoDetail(Video video) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => FullScreenVideoPlayer(
+          videos: _videos,
+          initialIndex: _videos.indexWhere((v) => v.id == video.id),
+        ),
+      ),
     );
   }
 

@@ -2,15 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shots_studio/models/screenshot_model.dart';
-import 'package:shots_studio/widgets/screenshots/screenshot_card.dart';
+import 'package:shots_studio/models/video_model.dart';
+import 'package:shots_studio/widgets/screenshots/media_card.dart';
 import 'package:shots_studio/services/analytics/analytics_service.dart';
+import 'package:shots_studio/screens/full_screen_video_player.dart';
 import 'package:shots_studio/utils/responsive_utils.dart';
 import 'package:shots_studio/services/hard_delete_service.dart';
 import 'package:shots_studio/l10n/app_localizations.dart';
 
 class ScreenshotsSection extends StatefulWidget {
   final List<Screenshot> screenshots;
-  final Function(Screenshot) onScreenshotTap;
+  final List<Video> videos;
+  final Function(dynamic) onMediaTap;
   final Widget Function(BuildContext, Screenshot)? screenshotDetailBuilder;
   final Function(List<String>)? onBulkDelete;
   final VoidCallback? onScreenshotUpdated;
@@ -73,7 +76,7 @@ class _ScreenshotsSectionState extends State<ScreenshotsSection> {
   void _loadMoreItems() {
     if (_isLoadingMore) return;
 
-    final int totalItems = widget.screenshots.length;
+    final int totalItems = _media.length;
     final int currentlyShowing = (_currentPageIndex + 1) * _itemsPerPage;
 
     if (currentlyShowing >= totalItems) return;
@@ -93,9 +96,15 @@ class _ScreenshotsSectionState extends State<ScreenshotsSection> {
     });
   }
 
-  List<Screenshot> get _visibleScreenshots {
+  List<dynamic> get _media {
+    final combined = [...widget.screenshots, ...widget.videos];
+    combined.sort((a, b) => b.addedOn.compareTo(a.addedOn));
+    return combined;
+  }
+
+  List<dynamic> get _visibleMedia {
     final int endIndex = (_currentPageIndex + 1) * _itemsPerPage;
-    return widget.screenshots.take(endIndex).toList();
+    return _media.take(endIndex).toList();
   }
 
   void _enterSelectionMode(String screenshotId) {
@@ -430,28 +439,26 @@ class _ScreenshotsSectionState extends State<ScreenshotsSection> {
                 );
               }
 
-              final screenshot = _visibleScreenshots[index];
-              final isSelected = _selectedScreenshotIds.contains(screenshot.id);
+              final media = _visibleMedia[index];
+              final isSelected = _selectedScreenshotIds.contains(media.id);
 
-              return ScreenshotCard(
-                screenshot: screenshot,
+              return MediaCard(
+                media: media,
                 isSelectionMode: _isSelectionMode,
                 isSelected: isSelected,
-                onLongPress: () => _enterSelectionMode(screenshot.id),
+                onLongPress: () => _enterSelectionMode(media.id),
                 onSelectionToggle:
-                    () => _toggleScreenshotSelection(screenshot.id),
+                    () => _toggleScreenshotSelection(media.id),
                 onCorruptionDetected: widget.onScreenshotUpdated,
                 destinationBuilder:
-                    widget.screenshotDetailBuilder != null && !_isSelectionMode
+                    widget.screenshotDetailBuilder != null && !_isSelectionMode && media is Screenshot
                         ? (context) =>
-                            widget.screenshotDetailBuilder!(context, screenshot)
+                            widget.screenshotDetailBuilder!(context, media)
                         : null,
                 onTap:
                     _isSelectionMode
-                        ? () => _toggleScreenshotSelection(screenshot.id)
-                        : (widget.screenshotDetailBuilder == null
-                            ? () => widget.onScreenshotTap(screenshot)
-                            : null),
+                        ? () => _toggleScreenshotSelection(media.id)
+                        : () => widget.onMediaTap(media),
               );
             },
           ),

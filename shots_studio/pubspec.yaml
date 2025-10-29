@@ -50,6 +50,7 @@ dependencies:
   timezone: ^0.9.4
   battery_plus: ^6.0.2
   connectivity_plus: ^6.0.5
+  video_player: ^2.8.6
 
 dev_dependencies:
   sentry_dart_plugin: ^2.4.1
